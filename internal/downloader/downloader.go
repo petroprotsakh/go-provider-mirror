@@ -7,22 +7,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
-	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 
+	"github.com/petroprotsakh/go-provider-mirror/internal/httpclient"
 	"github.com/petroprotsakh/go-provider-mirror/internal/logging"
 	"github.com/petroprotsakh/go-provider-mirror/internal/registry"
 	"github.com/petroprotsakh/go-provider-mirror/internal/resolver"
-	"github.com/petroprotsakh/go-provider-mirror/internal/version"
 )
 
 // Config configures the downloader behavior.
@@ -50,7 +47,7 @@ func DefaultConfig() Config {
 type Downloader struct {
 	config     Config
 	client     *registry.Client
-	httpClient *http.Client
+	httpClient *httpclient.Client
 	log        *logging.Logger
 }
 
@@ -72,10 +69,11 @@ func New(config Config, client *registry.Client) *Downloader {
 	return &Downloader{
 		config: config,
 		client: client,
-		httpClient: &http.Client{
-			Transport: &version.Transport{Base: http.DefaultTransport},
-			Timeout:   5 * time.Minute,
-		},
+		httpClient: httpclient.New(
+			httpclient.Config{
+				Timeout: 5 * time.Minute, // longer timeout for downloads
+			},
+		),
 		log: logging.Default(),
 	}
 }
@@ -221,12 +219,12 @@ func (d *Downloader) downloadAll(ctx context.Context, tasks []DownloadTask) (
 				}
 				mu.Unlock()
 			} else if !d.config.ShowProgress {
-				// Log progress in non-progress mode
 				status := "downloaded"
 				if result.FromCache {
 					status = "cached"
 				}
-				d.log.Verbose("file ready",
+				d.log.Verbose(
+					"file ready",
 					"provider", t.Provider.Source.String(),
 					"version", t.Version.Version,
 					"platform", t.Platform,
@@ -344,7 +342,6 @@ func (d *Downloader) checkCache(path, expectedSHA256 string) bool {
 }
 
 // downloadWithRetry downloads a file with retry logic.
-// Only errors explicitly marked as retryable will be retried.
 func (d *Downloader) downloadWithRetry(
 	ctx context.Context,
 	url, destPath, expectedSHA256, name string,
@@ -354,7 +351,7 @@ func (d *Downloader) downloadWithRetry(
 
 	for attempt := 0; attempt <= d.config.Retries; attempt++ {
 		if attempt > 0 {
-			backoff := d.getBackoff(attempt, lastErr)
+			backoff := httpclient.Backoff(attempt, d.config.MaxBackoff, lastErr)
 			d.log.Debug(
 				"retrying download",
 				"attempt", attempt+1,
@@ -377,7 +374,7 @@ func (d *Downloader) downloadWithRetry(
 		lastErr = fmt.Errorf("attempt %d/%d: %w", attempt+1, d.config.Retries+1, err)
 
 		// Only retry if explicitly marked as retryable
-		var re *retryableError
+		var re *httpclient.RetryableError
 		if !errors.As(err, &re) {
 			return lastErr
 		}
@@ -386,20 +383,7 @@ func (d *Downloader) downloadWithRetry(
 	return lastErr
 }
 
-// getBackoff returns the backoff duration, using Retry-After header if available.
-func (d *Downloader) getBackoff(attempt int, lastErr error) time.Duration {
-	var re *retryableError
-	if errors.As(lastErr, &re) && re.retryAfter > 0 {
-		if re.retryAfter <= d.config.MaxBackoff {
-			return re.retryAfter
-		}
-		return d.config.MaxBackoff
-	}
-	return d.calculateBackoff(attempt)
-}
-
 // downloadFile downloads a single file with optional progress bar.
-// Returns retryableError for transient failures that can be retried.
 func (d *Downloader) downloadFile(
 	ctx context.Context,
 	url, destPath, expectedSHA256, name string,
@@ -429,15 +413,16 @@ func (d *Downloader) downloadFile(
 		return fmt.Errorf("creating request: %w", err)
 	}
 
+	// Use shared client (adds User-Agent)
 	resp, err := d.httpClient.Do(req)
 	if err != nil {
-		// Network errors ARE retryable
-		return &retryableError{err: fmt.Errorf("downloading: %w", err)}
+		// Network errors are retryable
+		return &httpclient.RetryableError{Err: fmt.Errorf("downloading: %w", err)}
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
-		return newHTTPError(resp)
+		return httpclient.NewHTTPError(resp)
 	}
 
 	// Set up reader (with or without progress bar)
@@ -479,7 +464,7 @@ func (d *Downloader) downloadFile(
 		return fmt.Errorf("writing file: %w", err)
 	}
 
-	// Verify checksum
+	// Verify checksum (not retryable - data corruption)
 	actualSum := hex.EncodeToString(h.Sum(nil))
 	if actualSum != expectedSHA256 {
 		if bar != nil {
@@ -498,58 +483,4 @@ func (d *Downloader) downloadFile(
 
 	success = true
 	return nil
-}
-
-// calculateBackoff calculates exponential backoff with jitter.
-func (d *Downloader) calculateBackoff(attempt int) time.Duration {
-	baseBackoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
-	jitter := time.Duration(float64(baseBackoff) * (0.5 - rand.Float64()) * 0.5)
-	backoff := baseBackoff + jitter
-
-	if backoff > d.config.MaxBackoff {
-		backoff = d.config.MaxBackoff
-	}
-
-	return backoff
-}
-
-// retryableError wraps an error that can be retried.
-type retryableError struct {
-	err        error
-	retryAfter time.Duration // optional hint from Retry-After header
-}
-
-func (e *retryableError) Error() string {
-	return e.err.Error()
-}
-
-func (e *retryableError) Unwrap() error {
-	return e.err
-}
-
-// newHTTPError creates an error from an HTTP response.
-// Returns *retryableError for 429 and 5xx, plain error otherwise.
-func newHTTPError(resp *http.Response) error {
-	statusCode := resp.StatusCode
-	err := fmt.Errorf("HTTP %d", statusCode)
-
-	switch statusCode {
-	case http.StatusTooManyRequests: // 429
-		re := &retryableError{err: err}
-		if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
-			if seconds, parseErr := strconv.Atoi(retryAfter); parseErr == nil {
-				re.retryAfter = time.Duration(seconds) * time.Second
-			}
-		}
-		return re
-
-	case http.StatusInternalServerError, // 500
-		http.StatusBadGateway,         // 502
-		http.StatusServiceUnavailable, // 503
-		http.StatusGatewayTimeout:     // 504
-		return &retryableError{err: err}
-
-	default:
-		return err
-	}
 }
