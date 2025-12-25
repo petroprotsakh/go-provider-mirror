@@ -40,8 +40,11 @@ func New(config Config) (*Builder, error) {
 	return &Builder{
 		config:   config,
 		manifest: m,
-		client:   registry.NewClient(),
-		log:      logging.Default(),
+		client: registry.NewClient(&registry.Config{
+			Retries:    config.Retries,
+			MaxBackoff: time.Duration(config.MaxBackoff) * time.Second,
+		}),
+		log: logging.Default(),
 	}, nil
 }
 

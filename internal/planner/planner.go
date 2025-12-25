@@ -26,7 +26,7 @@ func New(manifestPath string) (*Planner, error) {
 	return &Planner{
 		manifestPath: manifestPath,
 		manifest:     m,
-		client:       registry.NewClient(),
+		client:       registry.NewClient(nil), // use defaults
 	}, nil
 }
 

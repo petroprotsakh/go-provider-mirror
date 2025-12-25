@@ -13,21 +13,50 @@ import (
 	"github.com/petroprotsakh/go-provider-mirror/internal/httpclient"
 )
 
+// Config configures the registry client.
+type Config struct {
+	Timeout    time.Duration
+	Retries    int
+	MaxBackoff time.Duration
+}
+
+// DefaultConfig returns sensible defaults.
+func DefaultConfig() Config {
+	return Config{
+		Timeout:    30 * time.Second,
+		Retries:    3,
+		MaxBackoff: 60 * time.Second,
+	}
+}
+
 // Client is a provider registry client.
 type Client struct {
 	http *httpclient.Client
 }
 
-// NewClient creates a new registry client.
-func NewClient() *Client {
+// NewClient creates a new registry client with the given config.
+// Pass nil or empty config to use defaults.
+func NewClient(cfg *Config) *Client {
+	if cfg == nil {
+		defaults := DefaultConfig()
+		cfg = &defaults
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = DefaultConfig().Timeout
+	}
+	if cfg.Retries <= 0 {
+		cfg.Retries = DefaultConfig().Retries
+	}
+	if cfg.MaxBackoff <= 0 {
+		cfg.MaxBackoff = DefaultConfig().MaxBackoff
+	}
+
 	return &Client{
-		http: httpclient.New(
-			httpclient.Config{
-				Timeout:    30 * time.Second,
-				Retries:    3,
-				MaxBackoff: 60 * time.Second,
-			},
-		),
+		http: httpclient.New(httpclient.Config{
+			Timeout:    cfg.Timeout,
+			Retries:    cfg.Retries,
+			MaxBackoff: cfg.MaxBackoff,
+		}),
 	}
 }
 
