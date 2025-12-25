@@ -56,8 +56,7 @@ func (b *Builder) Build(ctx context.Context) error {
 		log.Print("Providers: %d\n", len(b.manifest.Providers))
 		log.Println()
 	} else {
-		logging.Info(
-			"starting mirror build",
+		log.Info("starting mirror build",
 			"manifest", b.config.ManifestPath,
 			"output", b.config.OutputDir,
 			"providers", len(b.manifest.Providers),
@@ -68,7 +67,7 @@ func (b *Builder) Build(ctx context.Context) error {
 	if log.IsNormal() {
 		log.Print("→ Resolving provider versions...\n")
 	} else {
-		logging.Info("resolving provider versions")
+		log.Info("resolving provider versions")
 	}
 
 	startResolve := time.Now()
@@ -90,15 +89,12 @@ func (b *Builder) Build(ctx context.Context) error {
 
 	resolveTime := time.Since(startResolve).Round(time.Millisecond)
 	if log.IsNormal() {
-		log.Print(
-			"  Resolved %d provider(s), %d version(s) in %s\n",
-			len(resolution.Providers), totalVersions, resolveTime,
-		)
+		log.Print("  Resolved %d provider(s), %d version(s) in %s\n",
+			len(resolution.Providers), totalVersions, resolveTime)
 		log.Print("  Total downloads: %d\n", totalDownloads)
 		log.Println()
 	} else {
-		logging.Info(
-			"version resolution complete",
+		log.Info("version resolution complete",
 			"providers", len(resolution.Providers),
 			"versions", totalVersions,
 			"downloads", totalDownloads,
@@ -109,8 +105,7 @@ func (b *Builder) Build(ctx context.Context) error {
 	// Log resolved versions in verbose mode
 	for _, p := range resolution.Providers {
 		for _, v := range p.Versions {
-			logging.Verbose(
-				"resolved version",
+			log.Verbose("resolved version",
 				"provider", p.Source.String(),
 				"version", v.Version,
 				"platforms", v.Platforms,
@@ -122,7 +117,7 @@ func (b *Builder) Build(ctx context.Context) error {
 	if log.IsNormal() {
 		log.Print("→ Downloading providers (%d files)...\n", totalDownloads)
 	} else {
-		logging.Info("downloading providers", "count", totalDownloads)
+		log.Info("downloading providers", "count", totalDownloads)
 	}
 
 	startDownload := time.Now()
@@ -148,8 +143,7 @@ func (b *Builder) Build(ctx context.Context) error {
 			if log.IsNormal() {
 				log.Print("  ✗ %s: %v\n", r.Task.Provider.Source.String(), r.Error)
 			} else {
-				logging.Error(
-					"download failed",
+				log.Error("download failed",
 					"provider", r.Task.Provider.Source.String(),
 					"version", r.Task.Version.Version,
 					"platform", r.Task.Platform,
@@ -173,14 +167,11 @@ func (b *Builder) Build(ctx context.Context) error {
 
 	downloadTime := time.Since(startDownload).Round(time.Millisecond)
 	if log.IsNormal() {
-		log.Print(
-			"  Downloaded: %d, Cache hits: %d, Total: %d in %s\n",
-			downloaded, fromCache, len(results), downloadTime,
-		)
+		log.Print("  Downloaded: %d, Cache hits: %d, Total: %d in %s\n",
+			downloaded, fromCache, len(results), downloadTime)
 		log.Println()
 	} else {
-		logging.Info(
-			"downloads complete",
+		log.Info("downloads complete",
 			"downloaded", downloaded,
 			"cache_hits", fromCache,
 			"total", len(results),
@@ -192,7 +183,7 @@ func (b *Builder) Build(ctx context.Context) error {
 	if log.IsNormal() {
 		log.Print("→ Writing mirror...\n")
 	} else {
-		logging.Info("writing mirror")
+		log.Info("writing mirror")
 	}
 
 	startWrite := time.Now()
@@ -207,7 +198,7 @@ func (b *Builder) Build(ctx context.Context) error {
 		log.Print("  Wrote mirror in %s\n", writeTime)
 		log.Println()
 	} else {
-		logging.Info("mirror written", "duration", writeTime)
+		log.Info("mirror written", "duration", writeTime)
 	}
 
 	// Summary
@@ -223,16 +214,14 @@ func (b *Builder) Build(ctx context.Context) error {
 	} else {
 		for _, p := range resolution.Providers {
 			for _, v := range p.Versions {
-				logging.Verbose(
-					"mirror includes",
+				log.Verbose("mirror includes",
 					"provider", p.Source.String(),
 					"version", v.Version,
 					"platforms", len(v.Platforms),
 				)
 			}
 		}
-		logging.Info(
-			"build complete",
+		log.Info("build complete",
 			"providers", len(resolution.Providers),
 			"versions", totalVersions,
 			"files", len(results),

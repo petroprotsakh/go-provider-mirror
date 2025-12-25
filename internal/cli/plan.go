@@ -60,10 +60,8 @@ func runPlan(ctx context.Context, opts *planOptions) error {
 
 	log := logging.Default()
 	if log.IsNormal() {
-		log.Print(
-			"Plan: %d providers, %d versions, %d downloads\n\n",
-			len(plan.Providers), plan.TotalVersions, plan.TotalDownloads,
-		)
+		log.Print("Plan: %d providers, %d versions, %d downloads\n\n",
+			len(plan.Providers), plan.TotalVersions, plan.TotalDownloads)
 
 		for _, prov := range plan.Providers {
 			log.Print("  %s\n", prov.Source)
@@ -72,8 +70,7 @@ func runPlan(ctx context.Context, opts *planOptions) error {
 			}
 		}
 	} else {
-		logging.Info(
-			"plan complete",
+		log.Info("plan complete",
 			"providers", len(plan.Providers),
 			"versions", plan.TotalVersions,
 			"downloads", plan.TotalDownloads,
@@ -81,8 +78,7 @@ func runPlan(ctx context.Context, opts *planOptions) error {
 
 		for _, prov := range plan.Providers {
 			for _, v := range prov.Versions {
-				logging.Verbose(
-					"would download",
+				log.Verbose("would download",
 					"provider", prov.Source,
 					"version", v.Version,
 					"platforms", v.Platforms,

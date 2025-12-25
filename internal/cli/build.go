@@ -109,7 +109,7 @@ func runBuild(ctx context.Context, opts *buildOptions) error {
 	if log.IsNormal() {
 		log.Println("✓ Mirror built successfully")
 	} else {
-		logging.Info("mirror built successfully")
+		log.Info("mirror built successfully")
 	}
 
 	return nil

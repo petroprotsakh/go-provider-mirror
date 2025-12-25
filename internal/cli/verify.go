@@ -56,7 +56,7 @@ func runVerify(ctx context.Context, opts *verifyOptions) error {
 			}
 		} else {
 			for _, e := range result.Errors {
-				logging.Error("verification error", "error", e)
+				log.Error("verification error", "error", e)
 			}
 		}
 		return fmt.Errorf("mirror is invalid")
@@ -68,7 +68,7 @@ func runVerify(ctx context.Context, opts *verifyOptions) error {
 		log.Print("  Versions:  %d\n", result.VersionCount)
 		log.Print("  Files:     %d\n", result.FileCount)
 	} else {
-		logging.Info("mirror verified successfully",
+		log.Info("mirror verified successfully",
 			"providers", result.ProviderCount,
 			"versions", result.VersionCount,
 			"files", result.FileCount,

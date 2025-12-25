@@ -149,67 +149,51 @@ func (l *Logger) ShowProgress() bool {
 
 // --- Pretty printing for normal mode ---
 
-// Print prints a message (only in normal mode, not quiet).
+// Print prints a formatted message (only in normal/pretty mode).
 func (l *Logger) Print(format string, args ...any) {
 	if l.level >= LevelNormal && !l.UseStructuredLogs() {
 		_, _ = fmt.Fprintf(l.output, format, args...)
 	}
 }
 
-// Println prints a message with newline (only in normal mode).
+// Println prints a line (only in normal/pretty mode).
 func (l *Logger) Println(args ...any) {
 	if l.level >= LevelNormal && !l.UseStructuredLogs() {
 		_, _ = fmt.Fprintln(l.output, args...)
 	}
 }
 
-// --- Convenience functions that use the default logger ---
+// --- Structured logging methods (shadow embedded slog.Logger) ---
 
-// Info logs at info level.
-// In normal mode, this is a no-op (Print/Println are used for pretty output).
-// In verbose/debug/JSON modes, this uses slog.
-func Info(msg string, args ...any) {
-	l := Default()
+// Info logs at info level (only in structured/verbose mode).
+func (l *Logger) Info(msg string, args ...any) {
 	if l.UseStructuredLogs() {
-		l.Info(msg, args...)
+		l.Logger.Info(msg, args...)
 	}
 }
 
-// Debug logs at debug level (shown only in debug mode).
-func Debug(msg string, args ...any) {
-	l := Default()
+// Debug logs at debug level (only in debug mode).
+func (l *Logger) Debug(msg string, args ...any) {
 	if l.UseStructuredLogs() {
-		l.Debug(msg, args...)
+		l.Logger.Debug(msg, args...)
 	}
 }
 
-// Warn logs at warn level.
-func Warn(msg string, args ...any) {
-	l := Default()
+// Warn logs at warn level (only in structured/verbose mode).
+func (l *Logger) Warn(msg string, args ...any) {
 	if l.UseStructuredLogs() {
-		l.Warn(msg, args...)
+		l.Logger.Warn(msg, args...)
 	}
 }
 
 // Error logs at error level (always shown, even in quiet mode).
-func Error(msg string, args ...any) {
-	Default().Error(msg, args...)
+func (l *Logger) Error(msg string, args ...any) {
+	l.Logger.Error(msg, args...)
 }
 
-// Verbose logs only if verbose mode is enabled.
-func Verbose(msg string, args ...any) {
-	l := Default()
+// Verbose logs at info level but only if verbose mode is enabled.
+func (l *Logger) Verbose(msg string, args ...any) {
 	if l.IsVerbose() {
-		l.Info(msg, args...)
+		l.Logger.Info(msg, args...)
 	}
-}
-
-// Print prints a formatted message in normal mode.
-func Print(format string, args ...any) {
-	Default().Print(format, args...)
-}
-
-// Println prints a line in normal mode.
-func Println(args ...any) {
-	Default().Println(args...)
 }

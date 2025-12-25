@@ -226,8 +226,7 @@ func (d *Downloader) downloadAll(ctx context.Context, tasks []DownloadTask) (
 				if result.FromCache {
 					status = "cached"
 				}
-				logging.Verbose(
-					"file ready",
+				d.log.Verbose("file ready",
 					"provider", t.Provider.Source.String(),
 					"version", t.Version.Version,
 					"platform", t.Platform,
