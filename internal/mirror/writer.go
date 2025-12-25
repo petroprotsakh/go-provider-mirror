@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/petroprotsakh/go-provider-mirror/internal/downloader"
-	"github.com/petroprotsakh/go-provider-mirror/internal/manifest"
 )
 
 // Writer writes provider mirror filesystem layout
@@ -33,7 +32,7 @@ type IndexJSON struct {
 }
 
 // Write writes the complete mirror from download results
-func (w *Writer) Write(results []downloader.DownloadResult, m *manifest.Manifest) error {
+func (w *Writer) Write(results []downloader.DownloadResult) error {
 	// Clean staging directory
 	if err := os.RemoveAll(w.stagingDir); err != nil {
 		return fmt.Errorf("cleaning staging directory: %w", err)
@@ -82,7 +81,7 @@ func (w *Writer) Write(results []downloader.DownloadResult, m *manifest.Manifest
 	}
 
 	// Write lock file
-	if err := w.writeLockFile(results, m); err != nil {
+	if err := w.writeLockFile(results); err != nil {
 		return fmt.Errorf("writing lock file: %w", err)
 	}
 
@@ -157,7 +156,6 @@ func (w *Writer) writeProvider(
 type LockFile struct {
 	Version     int                `json:"version"`
 	GeneratedAt string             `json:"generated_at"`
-	Engines     []string           `json:"engines"`
 	Providers   []LockFileProvider `json:"providers"`
 }
 
@@ -185,7 +183,7 @@ type LockFilePlatform struct {
 }
 
 // writeLockFile writes the mirror.lock file
-func (w *Writer) writeLockFile(results []downloader.DownloadResult, m *manifest.Manifest) error {
+func (w *Writer) writeLockFile(results []downloader.DownloadResult) error {
 	// Group results by provider
 	type providerKey struct {
 		source    string
@@ -234,18 +232,10 @@ func (w *Writer) writeLockFile(results []downloader.DownloadResult, m *manifest.
 		)
 	}
 
-	// Convert engines to strings
-	engines := make([]string, len(m.Defaults.Engines))
-	for i, e := range m.Defaults.Engines {
-		engines[i] = string(e)
-	}
-	sort.Strings(engines)
-
 	// Build lock file with stable ordering
 	lockFile := LockFile{
 		Version:     1,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
-		Engines:     engines,
 	}
 
 	// Sort providers for deterministic output

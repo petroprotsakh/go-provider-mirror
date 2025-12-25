@@ -198,7 +198,7 @@ func (b *Builder) Build(ctx context.Context) error {
 	startWrite := time.Now()
 
 	writer := mirror.NewWriter(b.config.OutputDir)
-	if err := writer.Write(results, b.manifest); err != nil {
+	if err := writer.Write(results); err != nil {
 		return fmt.Errorf("writing mirror: %w", err)
 	}
 
