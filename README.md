@@ -1,5 +1,7 @@
 # provider-mirror
 
+[![Build](https://github.com/petroprotsakh/go-provider-mirror/actions/workflows/test.yml/badge.svg)](https://github.com/petroprotsakh/go-provider-mirror/actions/workflows/test.yml)
+
 A CLI tool that builds Terraform and OpenTofu provider mirrors from a declarative YAML manifest.
 
 The tool focuses on **manifest-driven, reproducible mirrors**, rather than scanning existing `.tf` configurations.
