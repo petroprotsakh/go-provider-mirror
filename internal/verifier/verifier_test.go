@@ -465,3 +465,47 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+// --- Context cancellation tests ---
+
+func TestVerify_ContextCancelled(t *testing.T) {
+	// Create a valid mirror structure
+	tmpDir := t.TempDir()
+
+	// Create lock file with a provider
+	lockFile := mirror.LockFile{
+		Version:     1,
+		GeneratedAt: "2024-01-01T00:00:00Z",
+		Providers: []mirror.LockFileProvider{
+			{
+				Hostname:  "registry.terraform.io",
+				Namespace: "hashicorp",
+				Name:      "null",
+				Versions: []mirror.LockFileVersion{
+					{
+						Version: "3.2.4",
+						Platforms: []mirror.LockFilePlatform{
+							{OS: "linux", Arch: "amd64", Filename: "file.zip", SHA256: "abc"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	lockData, _ := json.Marshal(lockFile)
+	if err := os.WriteFile(filepath.Join(tmpDir, "mirror.lock"), lockData, 0644); err != nil {
+		t.Fatalf("failed to write lock file: %v", err)
+	}
+
+	// Cancel context before verification
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	v := New(tmpDir)
+	_, err := v.Verify(ctx)
+
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}

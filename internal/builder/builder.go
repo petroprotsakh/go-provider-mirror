@@ -138,6 +138,11 @@ func (b *Builder) Build(ctx context.Context) error {
 
 	results, err := dl.Download(ctx, resolution)
 
+	// Check for cancellation first - don't print noisy individual errors
+	if ctx.Err() != nil {
+		return context.Canceled
+	}
+
 	// Count results
 	var failures, fromCache, downloaded int
 	for _, r := range results {
@@ -192,7 +197,11 @@ func (b *Builder) Build(ctx context.Context) error {
 	startWrite := time.Now()
 
 	writer := mirror.NewWriter(b.config.OutputDir)
-	if err := writer.Write(results); err != nil {
+	if err := writer.Write(ctx, results); err != nil {
+		// Check for cancellation
+		if ctx.Err() != nil {
+			return context.Canceled
+		}
 		return fmt.Errorf("writing mirror: %w", err)
 	}
 

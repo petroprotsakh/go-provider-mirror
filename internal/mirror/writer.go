@@ -1,6 +1,7 @@
 package mirror
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -48,7 +49,7 @@ type ArchiveInfo struct {
 }
 
 // Write writes the complete mirror from download results
-func (w *Writer) Write(results []downloader.DownloadResult) error {
+func (w *Writer) Write(ctx context.Context, results []downloader.DownloadResult) error {
 	// Clean staging directory
 	if err := os.RemoveAll(w.stagingDir); err != nil {
 		return fmt.Errorf("cleaning staging directory: %w", err)
@@ -64,8 +65,13 @@ func (w *Writer) Write(results []downloader.DownloadResult) error {
 		}
 	}
 
+	// Check for cancellation
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	// Pre-compute all h1 hashes
-	h1Hashes, err := computeHashesParallel(results)
+	h1Hashes, err := computeHashesParallel(ctx, results)
 	if err != nil {
 		return err
 	}
@@ -97,6 +103,11 @@ func (w *Writer) Write(results []downloader.DownloadResult) error {
 
 	// Write each provider
 	for pk, versions := range providerVersions {
+		// Check for cancellation between providers
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		if err := w.writeProvider(
 			pk.hostname,
 			pk.namespace,
@@ -206,7 +217,12 @@ func ComputePackageHash(zipPath string) (string, error) {
 }
 
 // computeHashesParallel computes h1 hashes for all results in parallel (CPU-intensive).
-func computeHashesParallel(results []downloader.DownloadResult) (map[string]string, error) {
+func computeHashesParallel(ctx context.Context, results []downloader.DownloadResult) (map[string]string, error) {
+	// Check for cancellation upfront
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	h1Hashes := make(map[string]string)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -217,12 +233,32 @@ func computeHashesParallel(results []downloader.DownloadResult) (map[string]stri
 	sem := make(chan struct{}, runtime.NumCPU())
 
 	for _, r := range results {
+		// Check for cancellation before starting new work
+		if ctx.Err() != nil {
+			errOnce.Do(func() { firstErr = ctx.Err() })
+			break
+		}
+
 		wg.Add(1)
 		go func(r downloader.DownloadResult) {
 			defer wg.Done()
 
+			// Check for cancellation
+			select {
+			case <-ctx.Done():
+				errOnce.Do(func() { firstErr = ctx.Err() })
+				return
+			default:
+			}
+
 			sem <- struct{}{}        // acquire
 			defer func() { <-sem }() // release
+
+			// Check again after acquiring semaphore
+			if ctx.Err() != nil {
+				errOnce.Do(func() { firstErr = ctx.Err() })
+				return
+			}
 
 			hash, err := ComputePackageHash(r.CachePath)
 			if err != nil {

@@ -36,7 +36,7 @@ type Result struct {
 }
 
 // Verify validates the mirror
-func (v *Verifier) Verify(_ context.Context) (*Result, error) {
+func (v *Verifier) Verify(ctx context.Context) (*Result, error) {
 	result := &Result{Valid: true}
 
 	// Check mirror directory exists
@@ -64,6 +64,11 @@ func (v *Verifier) Verify(_ context.Context) (*Result, error) {
 
 	// Verify each provider
 	for _, provider := range lockFile.Providers {
+		// Check for cancellation
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
 		result.ProviderCount++
 
 		providerDir := filepath.Join(
