@@ -46,6 +46,11 @@ type Resolution struct {
 // latest matching version. Multiple provider blocks for the same provider
 // are merged, and the result is deduplicated.
 func (r *Resolver) Resolve(ctx context.Context, m *manifest.Manifest) (*Resolution, error) {
+	// Check for cancellation upfront
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	expanded, err := m.GetExpandedProviders()
 	if err != nil {
 		return nil, fmt.Errorf("expanding providers: %w", err)

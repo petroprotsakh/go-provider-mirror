@@ -1,6 +1,7 @@
 package resolver
 
 import (
+	"context"
 	"reflect"
 	"sort"
 	"testing"
@@ -435,5 +436,29 @@ func TestNew(t *testing.T) {
 
 	if r.client != nil {
 		t.Error("client should be nil when passed nil")
+	}
+}
+
+// --- Context cancellation tests ---
+
+func TestResolve_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	r := New(nil)
+
+	m := &manifest.Manifest{
+		Defaults: manifest.Defaults{
+			Engines:   []manifest.Engine{manifest.EngineTerraform},
+			Platforms: []string{"linux_amd64"},
+		},
+		Providers: []manifest.Provider{
+			{Source: "hashicorp/null", Versions: []string{"3.2.4"}},
+		},
+	}
+
+	_, err := r.Resolve(ctx, m)
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }
