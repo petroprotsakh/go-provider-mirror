@@ -1,10 +1,10 @@
-name: CI
+name: Test
 
-on: push
+on: [push, pull_request]
 
 jobs:
-  lint:
-    name: Lint
+  test:
+    name: Test
     runs-on: ubuntu-latest
 
     steps:
@@ -16,7 +16,15 @@ jobs:
         with:
           go-version-file: '.go-version'
 
-      - name: golangci-lint
+      - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.7.2
+
+      - name: Test
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
