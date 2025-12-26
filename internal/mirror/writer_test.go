@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/petroprotsakh/go-provider-mirror/internal/downloader"
 )
 
 // --- NewWriter tests ---
@@ -173,6 +175,77 @@ func TestComputePackageHash_InvalidZip(t *testing.T) {
 	_, err := ComputePackageHash(invalidPath)
 	if err == nil {
 		t.Error("expected error for invalid zip")
+	}
+}
+
+// --- computeHashesParallel tests ---
+
+func TestComputeHashesParallel_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create test zips
+	zip1 := filepath.Join(tmpDir, "test1.zip")
+	zip2 := filepath.Join(tmpDir, "test2.zip")
+
+	if err := createTestZip(zip1, map[string]string{"file": "content1"}); err != nil {
+		t.Fatalf("failed to create zip1: %v", err)
+	}
+	if err := createTestZip(zip2, map[string]string{"file": "content2"}); err != nil {
+		t.Fatalf("failed to create zip2: %v", err)
+	}
+
+	results := []downloader.DownloadResult{
+		{CachePath: zip1, Filename: "test1.zip"},
+		{CachePath: zip2, Filename: "test2.zip"},
+	}
+
+	hashes, err := computeHashesParallel(results)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(hashes) != 2 {
+		t.Errorf("expected 2 hashes, got %d", len(hashes))
+	}
+
+	if _, ok := hashes[zip1]; !ok {
+		t.Error("missing hash for zip1")
+	}
+	if _, ok := hashes[zip2]; !ok {
+		t.Error("missing hash for zip2")
+	}
+
+	// Verify hashes are different (different content)
+	if hashes[zip1] == hashes[zip2] {
+		t.Error("hashes should be different for different content")
+	}
+
+	// Verify hash format
+	for path, hash := range hashes {
+		if !strings.HasPrefix(hash, "h1:") {
+			t.Errorf("hash for %s should start with 'h1:', got %s", path, hash)
+		}
+	}
+}
+
+func TestComputeHashesParallel_Empty(t *testing.T) {
+	hashes, err := computeHashesParallel([]downloader.DownloadResult{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hashes) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(hashes))
+	}
+}
+
+func TestComputeHashesParallel_Error(t *testing.T) {
+	results := []downloader.DownloadResult{
+		{CachePath: "/nonexistent/file.zip", Filename: "missing.zip"},
+	}
+
+	_, err := computeHashesParallel(results)
+	if err == nil {
+		t.Error("expected error for nonexistent file")
 	}
 }
 
