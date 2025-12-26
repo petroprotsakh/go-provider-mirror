@@ -30,7 +30,7 @@ Total 8 / 8   100 %
   Downloaded: 8, Cache hits: 0, Total: 8 in 11.402s
 
 → Writing mirror...
-  Wrote mirror in 20.621s
+  Wrote mirror in 2.999s
 
 Mirror contents:
   registry.opentofu.org/hashicorp/aws

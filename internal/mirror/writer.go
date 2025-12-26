@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"sync"
 	"time"
 
 	"golang.org/x/mod/sumdb/dirhash"
@@ -52,6 +54,22 @@ func (w *Writer) Write(results []downloader.DownloadResult) error {
 		return fmt.Errorf("cleaning staging directory: %w", err)
 	}
 
+	// Check for download errors first
+	for _, r := range results {
+		if r.Error != nil {
+			return fmt.Errorf(
+				"cannot write mirror: download failed for %s: %w",
+				r.Task.Provider.Source.String(), r.Error,
+			)
+		}
+	}
+
+	// Pre-compute all h1 hashes
+	h1Hashes, err := computeHashesParallel(results)
+	if err != nil {
+		return err
+	}
+
 	// Group results by provider and version
 	type providerKey struct {
 		hostname  string
@@ -62,13 +80,6 @@ func (w *Writer) Write(results []downloader.DownloadResult) error {
 	providerVersions := make(map[providerKey]map[string][]downloader.DownloadResult)
 
 	for _, r := range results {
-		if r.Error != nil {
-			return fmt.Errorf(
-				"cannot write mirror: download failed for %s: %w",
-				r.Task.Provider.Source.String(), r.Error,
-			)
-		}
-
 		pk := providerKey{
 			hostname:  r.Task.Provider.Source.Hostname,
 			namespace: r.Task.Provider.Source.Namespace,
@@ -86,7 +97,13 @@ func (w *Writer) Write(results []downloader.DownloadResult) error {
 
 	// Write each provider
 	for pk, versions := range providerVersions {
-		if err := w.writeProvider(pk.hostname, pk.namespace, pk.name, versions); err != nil {
+		if err := w.writeProvider(
+			pk.hostname,
+			pk.namespace,
+			pk.name,
+			versions,
+			h1Hashes,
+		); err != nil {
 			return fmt.Errorf(
 				"writing provider %s/%s/%s: %w",
 				pk.hostname, pk.namespace, pk.name, err,
@@ -95,7 +112,7 @@ func (w *Writer) Write(results []downloader.DownloadResult) error {
 	}
 
 	// Write lock file
-	if err := w.writeLockFile(results); err != nil {
+	if err := w.writeLockFile(results, h1Hashes); err != nil {
 		return fmt.Errorf("writing lock file: %w", err)
 	}
 
@@ -115,6 +132,7 @@ func (w *Writer) Write(results []downloader.DownloadResult) error {
 func (w *Writer) writeProvider(
 	hostname, namespace, name string,
 	versions map[string][]downloader.DownloadResult,
+	h1Hashes map[string]string,
 ) error {
 	providerDir := filepath.Join(w.stagingDir, hostname, namespace, name)
 
@@ -144,11 +162,7 @@ func (w *Writer) writeProvider(
 				return fmt.Errorf("copying %s: %w", dl.Filename, err)
 			}
 
-			// Compute h1: hash from extracted package contents
-			h1Hash, err := ComputePackageHash(dl.CachePath)
-			if err != nil {
-				return fmt.Errorf("computing h1 hash for %s: %w", dl.Filename, err)
-			}
+			h1Hash := h1Hashes[dl.CachePath]
 
 			versionMeta.Archives[platform] = ArchiveInfo{
 				Hashes: []string{h1Hash},
@@ -191,6 +205,50 @@ func ComputePackageHash(zipPath string) (string, error) {
 	return hash, nil
 }
 
+// computeHashesParallel computes h1 hashes for all results in parallel (CPU-intensive).
+func computeHashesParallel(results []downloader.DownloadResult) (map[string]string, error) {
+	h1Hashes := make(map[string]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var firstErr error
+	var errOnce sync.Once
+
+	// Limit concurrency to number of CPUs
+	sem := make(chan struct{}, runtime.NumCPU())
+
+	for _, r := range results {
+		wg.Add(1)
+		go func(r downloader.DownloadResult) {
+			defer wg.Done()
+
+			sem <- struct{}{}        // acquire
+			defer func() { <-sem }() // release
+
+			hash, err := ComputePackageHash(r.CachePath)
+			if err != nil {
+				errOnce.Do(
+					func() {
+						firstErr = fmt.Errorf("computing h1 hash for %s: %w", r.Filename, err)
+					},
+				)
+				return
+			}
+
+			mu.Lock()
+			h1Hashes[r.CachePath] = hash
+			mu.Unlock()
+		}(r)
+	}
+
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	return h1Hashes, nil
+}
+
 // LockFile represents the mirror.lock file
 type LockFile struct {
 	Version     int                `json:"version"`
@@ -223,7 +281,10 @@ type LockFilePlatform struct {
 }
 
 // writeLockFile writes the mirror.lock file
-func (w *Writer) writeLockFile(results []downloader.DownloadResult) error {
+func (w *Writer) writeLockFile(
+	results []downloader.DownloadResult,
+	h1Hashes map[string]string,
+) error {
 	// Group results by provider
 	type providerKey struct {
 		hostname  string
@@ -258,11 +319,7 @@ func (w *Writer) writeLockFile(results []downloader.DownloadResult) error {
 			}
 		}
 
-		// Compute h1 hash from package contents
-		h1Hash, err := ComputePackageHash(r.CachePath)
-		if err != nil {
-			return fmt.Errorf("computing h1 hash for lock file: %w", err)
-		}
+		h1Hash := h1Hashes[r.CachePath]
 
 		versionMap[pk][ver].Platforms = append(
 			versionMap[pk][ver].Platforms,

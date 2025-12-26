@@ -18,17 +18,21 @@ import (
 
 // Config configures the HTTP client behavior.
 type Config struct {
-	Timeout    time.Duration
-	Retries    int
-	MaxBackoff time.Duration
+	Timeout             time.Duration
+	Retries             int
+	MaxBackoff          time.Duration
+	MaxConnsPerHost     int
+	MaxIdleConnsPerHost int
 }
 
 // DefaultConfig returns sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		Timeout:    30 * time.Second,
-		Retries:    3,
-		MaxBackoff: 60 * time.Second,
+		Timeout:             30 * time.Second,
+		Retries:             3,
+		MaxBackoff:          60 * time.Second,
+		MaxConnsPerHost:     100,
+		MaxIdleConnsPerHost: 100,
 	}
 }
 
@@ -54,9 +58,25 @@ func New(cfg Config) *Client {
 	if cfg.MaxBackoff <= 0 {
 		cfg.MaxBackoff = defaults.MaxBackoff
 	}
+	if cfg.MaxConnsPerHost <= 0 {
+		cfg.MaxConnsPerHost = defaults.MaxConnsPerHost
+	}
+	if cfg.MaxIdleConnsPerHost <= 0 {
+		cfg.MaxIdleConnsPerHost = defaults.MaxIdleConnsPerHost
+	}
+
+	// Configure transport with higher connection limits for parallel downloads
+	transport := &http.Transport{
+		MaxConnsPerHost:     cfg.MaxConnsPerHost,
+		MaxIdleConnsPerHost: cfg.MaxIdleConnsPerHost,
+		MaxIdleConns:        cfg.MaxConnsPerHost * 2, // Allow more total idle connections
+	}
 
 	return &Client{
-		http:        &http.Client{Timeout: cfg.Timeout},
+		http: &http.Client{
+			Timeout:   cfg.Timeout,
+			Transport: transport,
+		},
 		credentials: loadCredentials(),
 		retries:     cfg.Retries,
 		maxBackoff:  cfg.MaxBackoff,
