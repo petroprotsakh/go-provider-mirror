@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"sync"
 	"time"
 
 	"golang.org/x/mod/sumdb/dirhash"
@@ -52,8 +54,7 @@ func (w *Writer) Write(results []downloader.DownloadResult) error {
 		return fmt.Errorf("cleaning staging directory: %w", err)
 	}
 
-	// Pre-compute all h1 hashes (expensive operation, do once)
-	h1Hashes := make(map[string]string) // cachePath -> h1 hash
+	// Check for download errors first
 	for _, r := range results {
 		if r.Error != nil {
 			return fmt.Errorf(
@@ -61,11 +62,12 @@ func (w *Writer) Write(results []downloader.DownloadResult) error {
 				r.Task.Provider.Source.String(), r.Error,
 			)
 		}
-		h1Hash, err := ComputePackageHash(r.CachePath)
-		if err != nil {
-			return fmt.Errorf("computing h1 hash for %s: %w", r.Filename, err)
-		}
-		h1Hashes[r.CachePath] = h1Hash
+	}
+
+	// Pre-compute all h1 hashes
+	h1Hashes, err := computeHashesParallel(results)
+	if err != nil {
+		return err
 	}
 
 	// Group results by provider and version
@@ -201,6 +203,50 @@ func ComputePackageHash(zipPath string) (string, error) {
 		return "", fmt.Errorf("computing package hash: %w", err)
 	}
 	return hash, nil
+}
+
+// computeHashesParallel computes h1 hashes for all results in parallel (CPU-intensive).
+func computeHashesParallel(results []downloader.DownloadResult) (map[string]string, error) {
+	h1Hashes := make(map[string]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var firstErr error
+	var errOnce sync.Once
+
+	// Limit concurrency to number of CPUs
+	sem := make(chan struct{}, runtime.NumCPU())
+
+	for _, r := range results {
+		wg.Add(1)
+		go func(r downloader.DownloadResult) {
+			defer wg.Done()
+
+			sem <- struct{}{}        // acquire
+			defer func() { <-sem }() // release
+
+			hash, err := ComputePackageHash(r.CachePath)
+			if err != nil {
+				errOnce.Do(
+					func() {
+						firstErr = fmt.Errorf("computing h1 hash for %s: %w", r.Filename, err)
+					},
+				)
+				return
+			}
+
+			mu.Lock()
+			h1Hashes[r.CachePath] = hash
+			mu.Unlock()
+		}(r)
+	}
+
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	return h1Hashes, nil
 }
 
 // LockFile represents the mirror.lock file
