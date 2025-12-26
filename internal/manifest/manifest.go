@@ -16,6 +16,16 @@ const (
 	EngineOpenTofu  Engine = "opentofu"
 )
 
+// IsValid returns true if the engine is a supported value
+func (e Engine) IsValid() bool {
+	switch e {
+	case EngineTerraform, EngineOpenTofu:
+		return true
+	default:
+		return false
+	}
+}
+
 // DefaultRegistry returns the default registry for an engine
 func (e Engine) DefaultRegistry() string {
 	switch e {
@@ -89,7 +99,7 @@ func Parse(data []byte) (*Manifest, error) {
 // Validate checks that the manifest is well-formed
 func (m *Manifest) Validate() error {
 	for _, e := range m.Defaults.Engines {
-		if e != EngineTerraform && e != EngineOpenTofu {
+		if !e.IsValid() {
 			return fmt.Errorf("unsupported engine: %s", e)
 		}
 	}
@@ -106,7 +116,7 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("provider %s: at least one version constraint is required", p.Source)
 		}
 		for _, e := range p.Engines {
-			if e != EngineTerraform && e != EngineOpenTofu {
+			if !e.IsValid() {
 				return fmt.Errorf("provider %s: unsupported engine: %s", p.Source, e)
 			}
 		}
