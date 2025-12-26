@@ -1,0 +1,39 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: provider-mirror
+    main: ./cmd/provider-mirror
+    binary: provider-mirror
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/petroprotsakh/go-provider-mirror/internal/version.Version={{.Version}}
+      - -X github.com/petroprotsakh/go-provider-mirror/internal/version.Commit={{.Commit}}
+      - -X github.com/petroprotsakh/go-provider-mirror/internal/version.BuildTime={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE*
+      - README*
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: petroprotsakh
+    name: go-provider-mirror
