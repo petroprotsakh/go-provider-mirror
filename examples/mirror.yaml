@@ -1,0 +1,26 @@
+# Example mirror manifest
+# This manifest builds a mirror for both Terraform and OpenTofu
+
+defaults:
+  engines:
+    - terraform
+    - opentofu
+  platforms:
+    - linux_amd64
+    - darwin_arm64
+
+providers:
+  # AWS provider - latest 5.x version
+  - source: hashicorp/aws
+    versions: ["~> 5.0"]
+
+  # Random provider - specific version, explicit registry (Terraform only)
+  - source: registry.terraform.io/hashicorp/random
+    versions: ["3.6.0"]
+
+  # Null provider - version range
+  # This resolves to the latest that satisfies the conditions
+  - source: hashicorp/null
+    versions: [">= 2.0, < 3.0"]
+    platforms:
+      - linux_amd64

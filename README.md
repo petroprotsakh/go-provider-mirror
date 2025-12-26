@@ -13,6 +13,40 @@ The tool focuses on **manifest-driven, reproducible mirrors**, rather than scann
 - **Declarative version selection** — Explicitly define which provider versions and platforms are allowed
 - **Terraform & OpenTofu support** — Build a single mirror usable by both engines
 
+## Usage
+
+```shell
+$ provider-mirror build --manifest ./examples/mirror.yaml -o mirror
+Building mirror from ./examples/mirror.yaml
+Output directory: mirror
+Providers: 3
+
+→ Resolving provider versions...
+  Resolved 5 provider(s), 5 version(s) in 420ms
+  Total downloads: 8
+
+→ Downloading providers (8 files)...
+Total 8 / 8   100 %
+  Downloaded: 8, Cache hits: 0, Total: 8 in 11.402s
+
+→ Writing mirror...
+  Wrote mirror in 20.621s
+
+Mirror contents:
+  registry.opentofu.org/hashicorp/aws
+    5.100.0 (2 platforms)
+  registry.opentofu.org/hashicorp/null
+    2.1.2 (1 platforms)
+  registry.terraform.io/hashicorp/aws
+    5.100.0 (2 platforms)
+  registry.terraform.io/hashicorp/null
+    2.1.2 (1 platforms)
+  registry.terraform.io/hashicorp/random
+    3.6.0 (2 platforms)
+
+✓ Mirror built successfully
+```
+
 ## Install
 
 ```bash
@@ -91,6 +125,21 @@ providers:
     platforms:                     # override defaults
       - linux_amd64
 ```
+
+Version constraints follow [Terraform's syntax](https://developer.hashicorp.com/terraform/language/expressions/version-constraints): `=`, `!=`, `>`, `>=`, `<`, `<=`, `~>`.
+
+See [examples](examples/) for more.
+
+## Private Registries
+
+For private registries, set credentials via environment variables:
+
+```bash
+# Format: PM_TOKEN_<hostname_with_underscores>
+export PM_TOKEN_registry_example_com="your-token"
+```
+
+The tool also reads `TF_TOKEN_*` variables for Terraform CLI compatibility.
 
 ## Output
 

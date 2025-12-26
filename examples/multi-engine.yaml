@@ -1,0 +1,20 @@
+# Multi-engine manifest with overlapping sources
+# This demonstrates how manifest_sources tracks provenance
+defaults:
+  engines:
+    - terraform
+    - opentofu
+  platforms:
+    - linux_amd64
+    - darwin_arm64
+
+providers:
+  # This expands to both TF and OpenTofu registries via engine expansion
+  - source: hashicorp/null
+    versions: ["3.2.4"]
+  
+  # This explicitly adds OpenTofu registry (overlaps with engine expansion above)
+  # The lock file will show both sources contributed to the OpenTofu version
+  - source: registry.opentofu.org/hashicorp/null
+    versions: ["3.2.4"]
+

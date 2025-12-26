@@ -22,6 +22,7 @@ type Writer struct {
 
 // NewWriter creates a new mirror writer
 func NewWriter(outputDir string) *Writer {
+	outputDir = filepath.Clean(outputDir)
 	return &Writer{
 		outputDir:  outputDir,
 		stagingDir: outputDir + ".staging",
