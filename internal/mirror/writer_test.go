@@ -23,6 +23,18 @@ func TestNewWriter(t *testing.T) {
 	}
 }
 
+func TestNewWriter_TrailingSlash(t *testing.T) {
+	w := NewWriter("mirror/")
+
+	if w.outputDir != "mirror" {
+		t.Errorf("expected outputDir 'mirror', got %s", w.outputDir)
+	}
+
+	if w.stagingDir != "mirror.staging" {
+		t.Errorf("expected stagingDir 'mirror.staging', got %s", w.stagingDir)
+	}
+}
+
 func TestNewWriter_DifferentPaths(t *testing.T) {
 	tests := []struct {
 		input       string
@@ -30,8 +42,11 @@ func TestNewWriter_DifferentPaths(t *testing.T) {
 		wantStaging string
 	}{
 		{"/tmp/mirror", "/tmp/mirror", "/tmp/mirror.staging"},
-		{"./output", "./output", "./output.staging"},
+		{"./output", "output", "output.staging"},
 		{"/var/data/providers", "/var/data/providers", "/var/data/providers.staging"},
+		{"/tmp/mirror/", "/tmp/mirror", "/tmp/mirror.staging"}, // trailing slash
+		{"mirror/", "mirror", "mirror.staging"},                // trailing slash
+		{"./mirror/", "mirror", "mirror.staging"},              // ./ and trailing slash
 	}
 
 	for _, tt := range tests {
