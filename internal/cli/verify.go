@@ -3,6 +3,9 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -39,6 +42,9 @@ This command validates:
 }
 
 func runVerify(ctx context.Context, opts *verifyOptions) error {
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	v := verifier.New(opts.mirrorDir)
 
 	result, err := v.Verify(ctx)

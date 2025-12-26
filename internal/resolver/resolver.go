@@ -109,6 +109,11 @@ func (r *Resolver) Resolve(ctx context.Context, m *manifest.Manifest) (*Resoluti
 	// Second pass: resolve each constraint group
 	for _, groups := range constraintGroups {
 		for _, cg := range groups {
+			// Check for cancellation
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+
 			resolvedVersion, err := r.resolveConstraintGroup(ctx, cg.constraint, cg.expansions)
 			if err != nil {
 				return nil, err

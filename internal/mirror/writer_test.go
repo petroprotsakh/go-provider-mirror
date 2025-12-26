@@ -2,6 +2,7 @@ package mirror
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -199,7 +200,7 @@ func TestComputeHashesParallel_Success(t *testing.T) {
 		{CachePath: zip2, Filename: "test2.zip"},
 	}
 
-	hashes, err := computeHashesParallel(results)
+	hashes, err := computeHashesParallel(context.Background(), results)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -229,7 +230,7 @@ func TestComputeHashesParallel_Success(t *testing.T) {
 }
 
 func TestComputeHashesParallel_Empty(t *testing.T) {
-	hashes, err := computeHashesParallel([]downloader.DownloadResult{})
+	hashes, err := computeHashesParallel(context.Background(), []downloader.DownloadResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -243,9 +244,23 @@ func TestComputeHashesParallel_Error(t *testing.T) {
 		{CachePath: "/nonexistent/file.zip", Filename: "missing.zip"},
 	}
 
-	_, err := computeHashesParallel(results)
+	_, err := computeHashesParallel(context.Background(), results)
 	if err == nil {
 		t.Error("expected error for nonexistent file")
+	}
+}
+
+func TestComputeHashesParallel_Cancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	results := []downloader.DownloadResult{
+		{CachePath: "/some/file.zip", Filename: "file.zip"},
+	}
+
+	_, err := computeHashesParallel(ctx, results)
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }
 
