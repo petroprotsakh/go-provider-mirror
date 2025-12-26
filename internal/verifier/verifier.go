@@ -66,47 +66,86 @@ func (v *Verifier) Verify(_ context.Context) (*Result, error) {
 	for _, provider := range lockFile.Providers {
 		result.ProviderCount++
 
-		for _, version := range provider.Versions {
-			result.VersionCount++
+		providerDir := filepath.Join(
+			v.mirrorDir,
+			provider.Hostname,
+			provider.Namespace,
+			provider.Name,
+		)
 
-			// Check version directory exists
-			versionDir := filepath.Join(
-				v.mirrorDir,
-				provider.Hostname,
-				provider.Namespace,
-				provider.Name,
-				version.Version,
+		// Check index.json exists and is valid
+		indexPath := filepath.Join(providerDir, "index.json")
+		indexData, err := os.ReadFile(indexPath)
+		if err != nil {
+			result.Valid = false
+			result.Errors = append(
+				result.Errors,
+				fmt.Sprintf(
+					"cannot read index.json for %s/%s: %v",
+					provider.Namespace, provider.Name, err,
+				),
 			)
-			if _, err := os.Stat(versionDir); os.IsNotExist(err) {
+		} else {
+			var index mirror.IndexJSON
+			if err := json.Unmarshal(indexData, &index); err != nil {
 				result.Valid = false
 				result.Errors = append(
 					result.Errors,
-					fmt.Sprintf("missing version directory: %s", versionDir),
+					fmt.Sprintf(
+						"invalid index.json for %s/%s: %v",
+						provider.Namespace, provider.Name, err,
+					),
 				)
-				continue
+			} else {
+				// Verify all versions in lock file are in index.json
+				for _, version := range provider.Versions {
+					if _, ok := index.Versions[version.Version]; !ok {
+						result.Valid = false
+						result.Errors = append(
+							result.Errors,
+							fmt.Sprintf(
+								"version %s not in index.json for %s/%s",
+								version.Version, provider.Namespace, provider.Name,
+							),
+						)
+					}
+				}
 			}
+		}
 
-			// Check SHA256SUMS file
-			shasumsPath := filepath.Join(versionDir, "SHA256SUMS")
-			shasumsData, err := os.ReadFile(shasumsPath)
+		for _, version := range provider.Versions {
+			result.VersionCount++
+
+			// Check <version>.json exists and is valid
+			versionJSONPath := filepath.Join(providerDir, version.Version+".json")
+			versionData, err := os.ReadFile(versionJSONPath)
 			if err != nil {
 				result.Valid = false
 				result.Errors = append(
 					result.Errors,
-					fmt.Sprintf("cannot read SHA256SUMS: %s", shasumsPath),
+					fmt.Sprintf("cannot read %s.json: %v", version.Version, err),
 				)
 				continue
 			}
 
-			shasums := parseSHA256SUMS(string(shasumsData))
+			var versionMeta mirror.VersionJSON
+			if err := json.Unmarshal(versionData, &versionMeta); err != nil {
+				result.Valid = false
+				result.Errors = append(
+					result.Errors,
+					fmt.Sprintf("invalid %s.json: %v", version.Version, err),
+				)
+				continue
+			}
 
 			// Verify each platform
 			for _, platform := range version.Platforms {
 				result.FileCount++
 
-				filePath := filepath.Join(versionDir, platform.Filename)
+				platformKey := fmt.Sprintf("%s_%s", platform.OS, platform.Arch)
 
-				// Check file exists
+				// Check archive exists
+				filePath := filepath.Join(providerDir, platform.Filename)
 				if _, err := os.Stat(filePath); os.IsNotExist(err) {
 					result.Valid = false
 					result.Errors = append(result.Errors, fmt.Sprintf("missing file: %s", filePath))
@@ -135,57 +174,51 @@ func (v *Verifier) Verify(_ context.Context) (*Result, error) {
 					continue
 				}
 
-				// Verify checksum matches SHA256SUMS file
-				if sumsChecksum, ok := shasums[platform.Filename]; ok {
-					if sumsChecksum != actualSum {
-						result.Valid = false
-						result.Errors = append(
-							result.Errors,
-							fmt.Sprintf("SHA256SUMS mismatch for %s", filePath),
-						)
-					}
+				// Verify version.json has this platform
+				archiveInfo, ok := versionMeta.Archives[platformKey]
+				if !ok {
+					result.Valid = false
+					result.Errors = append(
+						result.Errors,
+						fmt.Sprintf("platform %s not in %s.json", platformKey, version.Version),
+					)
+					continue
 				}
-			}
-		}
 
-		// Check index.json
-		indexPath := filepath.Join(
-			v.mirrorDir,
-			provider.Hostname,
-			provider.Namespace,
-			provider.Name,
-			"index.json",
-		)
-		indexData, err := os.ReadFile(indexPath)
-		if err != nil {
-			result.Valid = false
-			result.Errors = append(
-				result.Errors,
-				fmt.Sprintf("cannot read index.json: %s", indexPath),
-			)
-			continue
-		}
+				// Compute actual h1: hash from package contents
+				actualH1, err := mirror.ComputePackageHash(filePath)
+				if err != nil {
+					result.Valid = false
+					result.Errors = append(
+						result.Errors,
+						fmt.Sprintf("cannot compute h1 hash for %s: %v", filePath, err),
+					)
+					continue
+				}
 
-		var index mirror.IndexJSON
-		if err := json.Unmarshal(indexData, &index); err != nil {
-			result.Valid = false
-			result.Errors = append(
-				result.Errors,
-				fmt.Sprintf("invalid index.json: %s: %v", indexPath, err),
-			)
-			continue
-		}
+				// Verify h1 hash in version.json matches computed hash
+				if !containsHash(archiveInfo.Hashes, actualH1) {
+					result.Valid = false
+					result.Errors = append(
+						result.Errors,
+						fmt.Sprintf(
+							"h1 hash mismatch in %s.json for %s: expected %s, got %v",
+							version.Version, platformKey, actualH1, archiveInfo.Hashes,
+						),
+					)
+				}
 
-		// Verify all versions in lock file are in index.json
-		for _, version := range provider.Versions {
-			if _, ok := index.Versions[version.Version]; !ok {
-				result.Valid = false
-				result.Errors = append(
-					result.Errors, fmt.Sprintf(
-						"version %s not in index.json for %s/%s/%s",
-						version.Version, provider.Hostname, provider.Namespace, provider.Name,
-					),
-				)
+				// Verify URL in version.json matches filename
+				if archiveInfo.URL != platform.Filename {
+					result.Valid = false
+					result.Errors = append(
+						result.Errors,
+						fmt.Sprintf(
+							"URL mismatch in %s.json for %s: expected %s, got %s",
+							version.Version, platformKey, platform.Filename, archiveInfo.URL,
+						),
+					)
+				}
 			}
 		}
 	}
@@ -193,21 +226,14 @@ func (v *Verifier) Verify(_ context.Context) (*Result, error) {
 	return result, nil
 }
 
-// parseSHA256SUMS parses a SHA256SUMS file
-func parseSHA256SUMS(content string) map[string]string {
-	result := make(map[string]string)
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Format: "checksum  filename" (two spaces)
-		parts := strings.SplitN(line, "  ", 2)
-		if len(parts) == 2 {
-			result[parts[1]] = parts[0]
+// containsHash checks if a hash is in the list
+func containsHash(hashes []string, target string) bool {
+	for _, h := range hashes {
+		if strings.EqualFold(h, target) {
+			return true
 		}
 	}
-	return result
+	return false
 }
 
 // fileSHA256 calculates the SHA256 hash of a file

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"time"
 
+	"golang.org/x/mod/sumdb/dirhash"
+
 	"github.com/petroprotsakh/go-provider-mirror/internal/downloader"
 )
 
@@ -26,9 +28,20 @@ func NewWriter(outputDir string) *Writer {
 	}
 }
 
-// IndexJSON represents the index.json file format for a provider
+// IndexJSON represents the index.json file listing available versions.
 type IndexJSON struct {
-	Versions map[string]interface{} `json:"versions"`
+	Versions map[string]struct{} `json:"versions"`
+}
+
+// VersionJSON represents the <version>.json file format for a provider version.
+type VersionJSON struct {
+	Archives map[string]ArchiveInfo `json:"archives"`
+}
+
+// ArchiveInfo represents a single platform archive in the version metadata.
+type ArchiveInfo struct {
+	Hashes []string `json:"hashes"`
+	URL    string   `json:"url"`
 }
 
 // Write writes the complete mirror from download results
@@ -97,59 +110,84 @@ func (w *Writer) Write(results []downloader.DownloadResult) error {
 	return nil
 }
 
-// writeProvider writes a single provider to the staging directory
+// writeProvider writes a single provider to the staging directory.
 func (w *Writer) writeProvider(
 	hostname, namespace, name string,
 	versions map[string][]downloader.DownloadResult,
 ) error {
 	providerDir := filepath.Join(w.stagingDir, hostname, namespace, name)
 
-	// Build index.json
+	if err := os.MkdirAll(providerDir, 0o755); err != nil {
+		return fmt.Errorf("creating provider directory: %w", err)
+	}
+
+	// Build index.json with all versions
 	index := IndexJSON{
-		Versions: make(map[string]interface{}),
+		Versions: make(map[string]struct{}),
 	}
 
 	for version, downloads := range versions {
+		// Add to index
 		index.Versions[version] = struct{}{}
 
-		versionDir := filepath.Join(providerDir, version)
-		if err := os.MkdirAll(versionDir, 0o755); err != nil {
-			return fmt.Errorf("creating version directory: %w", err)
+		// Build version metadata
+		versionMeta := VersionJSON{
+			Archives: make(map[string]ArchiveInfo),
 		}
 
-		// Write SHA256SUMS
-		var shasums string
 		for _, dl := range downloads {
-			shasums += fmt.Sprintf("%s  %s\n", dl.SHA256Sum, dl.Filename)
+			platform := fmt.Sprintf("%s_%s", dl.Task.OS, dl.Task.Arch)
 
 			// Copy provider zip
-			if err := copyFile(dl.CachePath, filepath.Join(versionDir, dl.Filename)); err != nil {
+			if err := copyFile(dl.CachePath, filepath.Join(providerDir, dl.Filename)); err != nil {
 				return fmt.Errorf("copying %s: %w", dl.Filename, err)
+			}
+
+			// Compute h1: hash from extracted package contents
+			h1Hash, err := ComputePackageHash(dl.CachePath)
+			if err != nil {
+				return fmt.Errorf("computing h1 hash for %s: %w", dl.Filename, err)
+			}
+
+			versionMeta.Archives[platform] = ArchiveInfo{
+				Hashes: []string{h1Hash},
+				URL:    dl.Filename, // relative path within provider directory
 			}
 		}
 
-		shasumsPath := filepath.Join(versionDir, "SHA256SUMS")
-		if err := os.WriteFile(shasumsPath, []byte(shasums), 0o644); err != nil {
-			return fmt.Errorf("writing SHA256SUMS: %w", err)
+		// Write <version>.json
+		versionPath := filepath.Join(providerDir, version+".json")
+		versionData, err := json.MarshalIndent(versionMeta, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshaling %s.json: %w", version, err)
+		}
+
+		if err := os.WriteFile(versionPath, append(versionData, '\n'), 0o644); err != nil {
+			return fmt.Errorf("writing %s.json: %w", version, err)
 		}
 	}
 
 	// Write index.json
 	indexPath := filepath.Join(providerDir, "index.json")
-	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
-		return fmt.Errorf("creating provider directory: %w", err)
-	}
-
 	indexData, err := json.MarshalIndent(index, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling index.json: %w", err)
 	}
 
-	if err := os.WriteFile(indexPath, indexData, 0o644); err != nil {
+	if err := os.WriteFile(indexPath, append(indexData, '\n'), 0o644); err != nil {
 		return fmt.Errorf("writing index.json: %w", err)
 	}
 
 	return nil
+}
+
+// ComputePackageHash computes the h1: hash from a provider ZIP file content.
+func ComputePackageHash(zipPath string) (string, error) {
+	hash, err := dirhash.HashZip(zipPath, dirhash.Hash1)
+	if err != nil {
+		return "", fmt.Errorf("computing package hash: %w", err)
+	}
+	return hash, nil
 }
 
 // LockFile represents the mirror.lock file
