@@ -1,6 +1,8 @@
 package builder
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,14 +71,16 @@ providers:
 		t.Fatalf("failed to write manifest: %v", err)
 	}
 
-	b, err := New(Config{
-		ManifestPath: manifestPath,
-		OutputDir:    filepath.Join(tmpDir, "output"),
-		CacheDir:     filepath.Join(tmpDir, "cache"),
-		Concurrency:  4,
-		Retries:      3,
-		MaxBackoff:   60,
-	})
+	b, err := New(
+		Config{
+			ManifestPath: manifestPath,
+			OutputDir:    filepath.Join(tmpDir, "output"),
+			CacheDir:     filepath.Join(tmpDir, "cache"),
+			Concurrency:  4,
+			Retries:      3,
+			MaxBackoff:   60,
+		},
+	)
 
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -100,9 +104,11 @@ providers:
 }
 
 func TestNew_ManifestNotFound(t *testing.T) {
-	_, err := New(Config{
-		ManifestPath: "/nonexistent/manifest.yaml",
-	})
+	_, err := New(
+		Config{
+			ManifestPath: "/nonexistent/manifest.yaml",
+		},
+	)
 
 	if err == nil {
 		t.Error("expected error for nonexistent manifest")
@@ -118,9 +124,11 @@ func TestNew_InvalidManifest(t *testing.T) {
 		t.Fatalf("failed to write manifest: %v", err)
 	}
 
-	_, err := New(Config{
-		ManifestPath: manifestPath,
-	})
+	_, err := New(
+		Config{
+			ManifestPath: manifestPath,
+		},
+	)
 
 	if err == nil {
 		t.Error("expected error for invalid manifest")
@@ -141,9 +149,11 @@ providers: []
 		t.Fatalf("failed to write manifest: %v", err)
 	}
 
-	_, err := New(Config{
-		ManifestPath: manifestPath,
-	})
+	_, err := New(
+		Config{
+			ManifestPath: manifestPath,
+		},
+	)
 
 	if err == nil {
 		t.Error("expected error for empty providers")
@@ -163,9 +173,11 @@ providers:
 		t.Fatalf("failed to write manifest: %v", err)
 	}
 
-	_, err := New(Config{
-		ManifestPath: manifestPath,
-	})
+	_, err := New(
+		Config{
+			ManifestPath: manifestPath,
+		},
+	)
 
 	if err == nil {
 		t.Error("expected error for missing engines")
@@ -197,10 +209,12 @@ providers:
 		t.Fatalf("failed to write manifest: %v", err)
 	}
 
-	b, err := New(Config{
-		ManifestPath: manifestPath,
-		OutputDir:    filepath.Join(tmpDir, "output"),
-	})
+	b, err := New(
+		Config{
+			ManifestPath: manifestPath,
+			OutputDir:    filepath.Join(tmpDir, "output"),
+		},
+	)
 
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -242,9 +256,11 @@ providers:
 		t.Fatalf("failed to write manifest: %v", err)
 	}
 
-	b, err := New(Config{
-		ManifestPath: manifestPath,
-	})
+	b, err := New(
+		Config{
+			ManifestPath: manifestPath,
+		},
+	)
 
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -356,5 +372,45 @@ providers:
 
 	if b.log == nil {
 		t.Error("log should be initialized")
+	}
+}
+
+// --- Context cancellation tests ---
+
+func TestBuild_ContextCancelled(t *testing.T) {
+	tmpDir := t.TempDir()
+	manifestPath := filepath.Join(tmpDir, "manifest.yaml")
+
+	content := `
+defaults:
+  engines:
+    - terraform
+  platforms:
+    - linux_amd64
+providers:
+  - source: hashicorp/null
+    versions: ["3.2.4"]
+`
+	if err := os.WriteFile(manifestPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+
+	b, err := New(
+		Config{
+			ManifestPath: manifestPath,
+			OutputDir:    filepath.Join(tmpDir, "output"),
+		},
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	// Cancel context before Build
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = b.Build(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }
