@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -37,26 +36,28 @@ type Client struct {
 // NewClient creates a new registry client with the given config.
 // Pass nil or empty config to use defaults.
 func NewClient(cfg *Config) *Client {
+	defaults := DefaultConfig()
 	if cfg == nil {
-		defaults := DefaultConfig()
 		cfg = &defaults
 	}
 	if cfg.Timeout <= 0 {
-		cfg.Timeout = DefaultConfig().Timeout
+		cfg.Timeout = defaults.Timeout
 	}
 	if cfg.Retries <= 0 {
-		cfg.Retries = DefaultConfig().Retries
+		cfg.Retries = defaults.Retries
 	}
 	if cfg.MaxBackoff <= 0 {
-		cfg.MaxBackoff = DefaultConfig().MaxBackoff
+		cfg.MaxBackoff = defaults.MaxBackoff
 	}
 
 	return &Client{
-		http: httpclient.New(httpclient.Config{
-			Timeout:    cfg.Timeout,
-			Retries:    cfg.Retries,
-			MaxBackoff: cfg.MaxBackoff,
-		}),
+		http: httpclient.New(
+			httpclient.Config{
+				Timeout:    cfg.Timeout,
+				Retries:    cfg.Retries,
+				MaxBackoff: cfg.MaxBackoff,
+			},
+		),
 	}
 }
 
@@ -243,11 +244,6 @@ func (c *Client) defaultServiceURL(hostname string) (string, error) {
 
 // ParsePlatform parses a platform string (os_arch) into OS and Arch.
 func ParsePlatform(platform string) (os, arch string, err error) {
-	// Handle URLs that might have been passed
-	if u, err := url.Parse(platform); err == nil && u.Scheme != "" {
-		platform = u.Path
-	}
-
 	parts := strings.Split(platform, "_")
 	if len(parts) != 2 {
 		return "", "", fmt.Errorf("invalid platform format: %s (expected os_arch)", platform)

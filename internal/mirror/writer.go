@@ -199,7 +199,6 @@ type LockFile struct {
 
 // LockFileProvider represents a provider in the lock file
 type LockFileProvider struct {
-	Source    string            `json:"source"`
 	Hostname  string            `json:"hostname"`
 	Namespace string            `json:"namespace"`
 	Name      string            `json:"name"`
@@ -208,8 +207,9 @@ type LockFileProvider struct {
 
 // LockFileVersion represents a version in the lock file
 type LockFileVersion struct {
-	Version   string             `json:"version"`
-	Platforms []LockFilePlatform `json:"platforms"`
+	Version         string             `json:"version"`
+	ManifestSources []string           `json:"manifest_sources"` // original source specs from manifest
+	Platforms       []LockFilePlatform `json:"platforms"`
 }
 
 // LockFilePlatform represents a platform in the lock file
@@ -217,55 +217,60 @@ type LockFilePlatform struct {
 	OS       string `json:"os"`
 	Arch     string `json:"arch"`
 	Filename string `json:"filename"`
-	SHA256   string `json:"sha256"`
+	SHA256   string `json:"sha256"` // archive checksum (from registry)
+	H1       string `json:"h1"`     // content hash (computed from package contents)
 }
 
 // writeLockFile writes the mirror.lock file
 func (w *Writer) writeLockFile(results []downloader.DownloadResult) error {
 	// Group results by provider
 	type providerKey struct {
-		source    string
 		hostname  string
 		namespace string
 		name      string
 	}
 
 	providerMap := make(map[providerKey]*LockFileProvider)
-	versionMap := make(map[string]map[string]*LockFileVersion) // provider -> version -> data
+	versionMap := make(map[providerKey]map[string]*LockFileVersion) // provider -> version -> data
 
 	for _, r := range results {
 		pk := providerKey{
-			source:    r.Task.Provider.SourceString,
 			hostname:  r.Task.Provider.Source.Hostname,
 			namespace: r.Task.Provider.Source.Namespace,
 			name:      r.Task.Provider.Source.Name,
 		}
 
-		key := fmt.Sprintf("%s/%s/%s", pk.hostname, pk.namespace, pk.name)
-
 		if providerMap[pk] == nil {
 			providerMap[pk] = &LockFileProvider{
-				Source:    pk.source,
 				Hostname:  pk.hostname,
 				Namespace: pk.namespace,
 				Name:      pk.name,
 			}
-			versionMap[key] = make(map[string]*LockFileVersion)
+			versionMap[pk] = make(map[string]*LockFileVersion)
 		}
 
-		if versionMap[key][r.Task.Version.Version] == nil {
-			versionMap[key][r.Task.Version.Version] = &LockFileVersion{
-				Version: r.Task.Version.Version,
+		ver := r.Task.Version.Version
+		if versionMap[pk][ver] == nil {
+			versionMap[pk][ver] = &LockFileVersion{
+				Version:         ver,
+				ManifestSources: r.Task.Version.ManifestSources,
 			}
 		}
 
-		versionMap[key][r.Task.Version.Version].Platforms = append(
-			versionMap[key][r.Task.Version.Version].Platforms,
+		// Compute h1 hash from package contents
+		h1Hash, err := ComputePackageHash(r.CachePath)
+		if err != nil {
+			return fmt.Errorf("computing h1 hash for lock file: %w", err)
+		}
+
+		versionMap[pk][ver].Platforms = append(
+			versionMap[pk][ver].Platforms,
 			LockFilePlatform{
 				OS:       r.Task.OS,
 				Arch:     r.Task.Arch,
 				Filename: r.Filename,
 				SHA256:   r.SHA256Sum,
+				H1:       h1Hash,
 			},
 		)
 	}
@@ -295,17 +300,16 @@ func (w *Writer) writeLockFile(results []downloader.DownloadResult) error {
 
 	for _, pk := range providerKeys {
 		provider := providerMap[pk]
-		key := fmt.Sprintf("%s/%s/%s", pk.hostname, pk.namespace, pk.name)
 
 		// Sort versions
 		var versions []string
-		for v := range versionMap[key] {
+		for v := range versionMap[pk] {
 			versions = append(versions, v)
 		}
 		sort.Strings(versions)
 
 		for _, v := range versions {
-			lv := versionMap[key][v]
+			lv := versionMap[pk][v]
 			// Sort platforms
 			sort.Slice(
 				lv.Platforms, func(i, j int) bool {

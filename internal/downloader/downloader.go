@@ -53,17 +53,18 @@ type Downloader struct {
 
 // New creates a new downloader.
 func New(config Config, client *registry.Client) *Downloader {
+	defaults := DefaultConfig()
 	if config.CacheDir == "" {
-		config.CacheDir = DefaultConfig().CacheDir
+		config.CacheDir = defaults.CacheDir
 	}
 	if config.Concurrency <= 0 {
-		config.Concurrency = DefaultConfig().Concurrency
+		config.Concurrency = defaults.Concurrency
 	}
 	if config.Retries <= 0 {
-		config.Retries = DefaultConfig().Retries
+		config.Retries = defaults.Retries
 	}
 	if config.MaxBackoff <= 0 {
-		config.MaxBackoff = DefaultConfig().MaxBackoff
+		config.MaxBackoff = defaults.MaxBackoff
 	}
 
 	return &Downloader{

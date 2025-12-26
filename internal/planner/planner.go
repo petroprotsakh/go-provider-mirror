@@ -11,9 +11,8 @@ import (
 
 // Planner plans a mirror build without downloading
 type Planner struct {
-	manifestPath string
-	manifest     *manifest.Manifest
-	client       *registry.Client
+	manifest *manifest.Manifest
+	client   *registry.Client
 }
 
 // New creates a new planner
@@ -24,9 +23,8 @@ func New(manifestPath string) (*Planner, error) {
 	}
 
 	return &Planner{
-		manifestPath: manifestPath,
-		manifest:     m,
-		client:       registry.NewClient(nil), // use defaults
+		manifest: m,
+		client:   registry.NewClient(nil), // use defaults
 	}, nil
 }
 

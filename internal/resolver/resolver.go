@@ -25,16 +25,15 @@ func New(client *registry.Client) *Resolver {
 
 // ResolvedProvider represents a provider with resolved concrete versions
 type ResolvedProvider struct {
-	Source       manifest.ProviderSource
-	Versions     []ResolvedVersion
-	Engine       manifest.Engine
-	SourceString string // original source spec
+	Source   manifest.ProviderSource
+	Versions []ResolvedVersion
 }
 
 // ResolvedVersion represents a single resolved version with platforms
 type ResolvedVersion struct {
-	Version   string
-	Platforms []string // os_arch format
+	Version         string
+	Platforms       []string // os_arch format
+	ManifestSources []string // original source specs from manifest that contributed to this version
 }
 
 // Resolution represents the complete resolution result
@@ -53,10 +52,11 @@ func (r *Resolver) Resolve(ctx context.Context, m *manifest.Manifest) (*Resoluti
 	}
 
 	// For each expanded provider, resolve each version constraint independently
-	// Key: hostname/namespace/name -> engine -> version -> platforms
+	// Key: hostname/namespace/name/version -> platforms
 	versionsMap := make(map[versionKey]map[string]bool) // key -> set of platforms
+	sourcesMap := make(map[versionKey]map[string]bool)  // key -> set of manifest sources
 
-	// Group by provider+engine for cross-registry consistency checks
+	// Group expansions by provider identity and constraint for resolution
 	// Key: namespace/name + constraint string
 	type constraintGroup struct {
 		constraint string
@@ -120,7 +120,6 @@ func (r *Resolver) Resolve(ctx context.Context, m *manifest.Manifest) (*Resoluti
 					hostname:  rv.Provider.Hostname,
 					namespace: rv.Provider.Namespace,
 					name:      rv.Provider.Name,
-					engine:    rv.Engine,
 					version:   rv.Version,
 				}
 
@@ -130,21 +129,26 @@ func (r *Resolver) Resolve(ctx context.Context, m *manifest.Manifest) (*Resoluti
 				for _, p := range rv.Platforms {
 					versionsMap[key][p] = true
 				}
+
+				// Track which manifest sources contributed to this version
+				if sourcesMap[key] == nil {
+					sourcesMap[key] = make(map[string]bool)
+				}
+				sourcesMap[key][rv.ManifestSource] = true
 			}
 		}
 	}
 
 	// Build final result
-	return buildResolution(versionsMap), nil
+	return buildResolution(versionsMap, sourcesMap), nil
 }
 
 // resolvedVersionResult holds the result for a single version resolution
 type resolvedVersionResult struct {
-	Provider  manifest.ProviderSource
-	Engine    manifest.Engine
-	Version   string
-	Platforms []string
-	Source    string
+	Provider       manifest.ProviderSource
+	Version        string
+	Platforms      []string
+	ManifestSource string // original source spec from manifest (e.g., "hashicorp/null")
 }
 
 // resolveConstraintGroup resolves a single constraint across multiple registry expansions.
@@ -230,11 +234,10 @@ func (r *Resolver) resolveConstraintGroup(
 
 		results = append(
 			results, resolvedVersionResult{
-				Provider:  ep.Source,
-				Engine:    ep.Engine,
-				Version:   selectedVersion,
-				Platforms: platforms,
-				Source:    ep.SourceSpec,
+				Provider:       ep.Source,
+				Version:        selectedVersion,
+				Platforms:      platforms,
+				ManifestSource: ep.SourceSpec,
 			},
 		)
 	}
@@ -242,70 +245,87 @@ func (r *Resolver) resolveConstraintGroup(
 	return results, nil
 }
 
-// versionKey identifies a unique provider version
+// versionKey identifies a unique provider version (artifact identity).
 type versionKey struct {
 	hostname  string
 	namespace string
 	name      string
-	engine    manifest.Engine
 	version   string
 }
 
+// versionData holds platforms and manifest sources for a version
+type versionData struct {
+	platforms []string
+	sources   []string
+}
+
 // buildResolution converts the map-based results into the Resolution structure
-func buildResolution(versionsMap map[versionKey]map[string]bool) *Resolution {
-	// Group by provider+engine
-	type providerEngineKey struct {
+func buildResolution(
+	versionsMap map[versionKey]map[string]bool,
+	sourcesMap map[versionKey]map[string]bool,
+) *Resolution {
+	// Group by provider (hostname/namespace/name)
+	type providerKey struct {
 		hostname  string
 		namespace string
 		name      string
-		engine    manifest.Engine
 	}
 
-	grouped := make(map[providerEngineKey]map[string][]string) // key -> version -> platforms
+	grouped := make(map[providerKey]map[string]*versionData) // key -> version -> data
 
 	for vk, platforms := range versionsMap {
-		pek := providerEngineKey{
+		pk := providerKey{
 			hostname:  vk.hostname,
 			namespace: vk.namespace,
 			name:      vk.name,
-			engine:    vk.engine,
 		}
 
-		if grouped[pek] == nil {
-			grouped[pek] = make(map[string][]string)
+		if grouped[pk] == nil {
+			grouped[pk] = make(map[string]*versionData)
 		}
 
-		var platformList []string
+		if grouped[pk][vk.version] == nil {
+			grouped[pk][vk.version] = &versionData{}
+		}
+
+		// Collect platforms
+		platformSet := make(map[string]bool)
+		for _, p := range grouped[pk][vk.version].platforms {
+			platformSet[p] = true
+		}
 		for p := range platforms {
+			platformSet[p] = true
+		}
+		var platformList []string
+		for p := range platformSet {
 			platformList = append(platformList, p)
 		}
 		sort.Strings(platformList)
+		grouped[pk][vk.version].platforms = platformList
 
-		// Merge platforms if version already exists
-		existing := grouped[pek][vk.version]
-		platformSet := make(map[string]bool)
-		for _, p := range existing {
-			platformSet[p] = true
+		// Collect manifest sources
+		sourceSet := make(map[string]bool)
+		for _, s := range grouped[pk][vk.version].sources {
+			sourceSet[s] = true
 		}
-		for _, p := range platformList {
-			platformSet[p] = true
+		for s := range sourcesMap[vk] {
+			sourceSet[s] = true
 		}
-
-		var merged []string
-		for p := range platformSet {
-			merged = append(merged, p)
+		var sourceList []string
+		for s := range sourceSet {
+			sourceList = append(sourceList, s)
 		}
-		sort.Strings(merged)
-		grouped[pek][vk.version] = merged
+		sort.Strings(sourceList)
+		grouped[pk][vk.version].sources = sourceList
 	}
 
 	// Build Resolution
 	result := &Resolution{}
 
 	// Sort provider keys for deterministic output
-	var providerKeys []providerEngineKey
-	for pek := range grouped {
-		providerKeys = append(providerKeys, pek)
+	var providerKeys []providerKey
+	for pk := range grouped {
+		providerKeys = append(providerKeys, pk)
 	}
 	sort.Slice(
 		providerKeys, func(i, j int) bool {
@@ -315,15 +335,12 @@ func buildResolution(versionsMap map[versionKey]map[string]bool) *Resolution {
 			if providerKeys[i].namespace != providerKeys[j].namespace {
 				return providerKeys[i].namespace < providerKeys[j].namespace
 			}
-			if providerKeys[i].name != providerKeys[j].name {
-				return providerKeys[i].name < providerKeys[j].name
-			}
-			return providerKeys[i].engine < providerKeys[j].engine
+			return providerKeys[i].name < providerKeys[j].name
 		},
 	)
 
-	for _, pek := range providerKeys {
-		versions := grouped[pek]
+	for _, pk := range providerKeys {
+		versions := grouped[pk]
 
 		// Sort versions descending
 		var versionStrs []string
@@ -343,10 +360,12 @@ func buildResolution(versionsMap map[versionKey]map[string]bool) *Resolution {
 
 		var resolvedVersions []ResolvedVersion
 		for _, v := range versionStrs {
+			data := versions[v]
 			resolvedVersions = append(
 				resolvedVersions, ResolvedVersion{
-					Version:   v,
-					Platforms: versions[v],
+					Version:         v,
+					Platforms:       data.platforms,
+					ManifestSources: data.sources,
 				},
 			)
 		}
@@ -354,13 +373,11 @@ func buildResolution(versionsMap map[versionKey]map[string]bool) *Resolution {
 		result.Providers = append(
 			result.Providers, ResolvedProvider{
 				Source: manifest.ProviderSource{
-					Hostname:  pek.hostname,
-					Namespace: pek.namespace,
-					Name:      pek.name,
+					Hostname:  pk.hostname,
+					Namespace: pk.namespace,
+					Name:      pk.name,
 				},
-				Versions:     resolvedVersions,
-				Engine:       pek.engine,
-				SourceString: fmt.Sprintf("%s/%s", pek.namespace, pek.name),
+				Versions: resolvedVersions,
 			},
 		)
 	}

@@ -44,14 +44,15 @@ type Client struct {
 
 // New creates a new HTTP client.
 func New(cfg Config) *Client {
+	defaults := DefaultConfig()
 	if cfg.Timeout <= 0 {
-		cfg.Timeout = DefaultConfig().Timeout
+		cfg.Timeout = defaults.Timeout
 	}
 	if cfg.Retries <= 0 {
-		cfg.Retries = DefaultConfig().Retries
+		cfg.Retries = defaults.Retries
 	}
 	if cfg.MaxBackoff <= 0 {
-		cfg.MaxBackoff = DefaultConfig().MaxBackoff
+		cfg.MaxBackoff = defaults.MaxBackoff
 	}
 
 	return &Client{
