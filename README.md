@@ -1,12 +1,15 @@
 # provider-mirror
 
-A CLI tool that builds Terraform and OpenTofu provider mirrors from a YAML manifest.
+A CLI tool that builds Terraform and OpenTofu provider mirrors from a declarative YAML manifest.
+
+The tool focuses on **manifest-driven, reproducible mirrors**, rather than scanning existing `.tf` configurations.
 
 ## Why
 
 - **Air-gapped environments** — Pre-download providers for networks without internet access
 - **Faster CI** — Local mirror is faster than registry lookups
-- **Version control** — Declare exactly which provider versions you need
+- **Declarative version selection** — Explicitly define which provider versions and platforms are allowed
+- **Terraform & OpenTofu support** — Build a single mirror usable by both engines
 
 ## Install
 
@@ -14,7 +17,8 @@ A CLI tool that builds Terraform and OpenTofu provider mirrors from a YAML manif
 go install github.com/petroprotsakh/go-provider-mirror/cmd/provider-mirror@latest
 ```
 
-Or download from [Releases](https://github.com/petroprotsakh/go-provider-mirror/releases).
+Or download a prebuilt binary from the
+[Releases](https://github.com/petroprotsakh/go-provider-mirror/releases) page.
 
 ## Quick Start
 
@@ -41,10 +45,10 @@ providers:
 provider-mirror build --manifest mirror.yaml --output ./mirror
 ```
 
-3. Configure Terraform to use it:
+3. Configure Terraform or OpenTofu to use it:
 
 ```hcl
-# ~/.terraformrc
+# ~/.terraformrc or ~/.tofurc
 provider_installation {
   filesystem_mirror {
     path = "/path/to/mirror"
@@ -82,31 +86,18 @@ providers:
 
   - source: hashicorp/null
     versions: ["3.2.4"]
-    platforms:                       # override defaults
+    platforms:                     # override defaults
       - linux_amd64
-```
-
-## Options
-
-```
---manifest, -m    Path to manifest file (required)
---output, -o      Output directory (default: ./mirror)
---cache           Cache directory (default: system temp)
---no-cache        Skip cache, re-download everything
---concurrency     Parallel downloads (default: 8)
---retries         Retry failed downloads (default: 3)
--v                Verbose output
--vv               Debug output
--q                Quiet, errors only
 ```
 
 ## Output
 
-The mirror follows Terraform's [filesystem mirror](https://developer.hashicorp.com/terraform/cli/config/config-file#filesystem_mirror) layout:
+The generated mirror follows Terraform’s filesystem mirror layout and includes
+a `mirror.lock` file with checksums and metadata to make builds reproducible:
 
 ```
 mirror/
-├── mirror.lock                              # checksums and metadata
+├── mirror.lock
 └── registry.terraform.io/
     └── hashicorp/
         └── aws/
@@ -115,7 +106,13 @@ mirror/
             └── terraform-provider-aws_5.0.0_linux_amd64.zip
 ```
 
+## Scope and Non-Goals
+
+- This tool does **not** scan `.tf` files or Terraform state
+- It does **not** replace Terraform/OpenTofu commands
+- It does **not** invoke or depend on Terraform or OpenTofu binaries
+- All inputs come from the manifest file
+
 ## License
 
 MIT
-
